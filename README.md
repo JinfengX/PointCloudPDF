@@ -31,7 +31,7 @@ Experimental results on the S3DIS and ScanNetv2 datasets demonstrate that the pr
 
 
 ## Code structure
-We organize our code based on the [Pointcept](https://github.com/ashleve/lightning-hydra-template) which is a powerful and flexible codebase for point cloud perception research.
+We organize our code based on the [Pointcept](https://github.com/Pointcept/Pointcept) which is a powerful and flexible codebase for point cloud perception research.
 The directory structure of our project looks like this:
 ```
 │
