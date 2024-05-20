@@ -5,6 +5,7 @@
 by [Jinfeng Xu](https://jinfengx.github.io/), Siyuan Yang, [Xianzhi Li](https://nini-lxz.github.io/), Yuan Tang, Yixue Hao, Long Hu, Min Chen
 
 [![Conference](https://img.shields.io/badge/CVPR-2024-blue)](https://cvpr.thecvf.com/Conferences/2024/)
+[![arXiv](https://img.shields.io/badge/arXiv-2404.00979-b31b1b.svg)](https://arxiv.org/abs/2404.00979)
 <a href="https://pytorch.org/get-started/locally/"><img alt="PyTorch" src="https://img.shields.io/badge/PyTorch-ee4c2c?logo=pytorch&logoColor=white"></a>
 <a href="https://github.com/Pointcept/Pointcept"><img alt="Pointcept" src="https://img.shields.io/badge/Forked_from-Pointcept-rgb(72,180,97)?logo=github&style=flat"></a>
 <br>
