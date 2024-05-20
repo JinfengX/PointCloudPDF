@@ -111,9 +111,15 @@ class Add(object):
 
 @TRANSFORMS.register_module()
 class NormalizeColor(object):
+    def __init__(self, mode="zeroCenter") -> None:
+        self.mode = mode
+
     def __call__(self, data_dict):
         if "color" in data_dict.keys():
-            data_dict["color"] = data_dict["color"] / 127.5 - 1
+            if self.mode == "zeroCenter":
+                data_dict["color"] = data_dict["color"] / 127.5 - 1
+            elif self.mode == "zeroOne":
+                data_dict["color"] = data_dict["color"] / 255
         return data_dict
 
 
@@ -1132,6 +1138,22 @@ class InstanceParser(object):
         data_dict["instance"] = instance
         data_dict["instance_centroid"] = centroid
         data_dict["bbox"] = bbox
+        return data_dict
+
+
+@TRANSFORMS.register_module()
+class MaskLabel(object):
+    def __init__(self, mask_label=None, mask_to=-1):
+        self.mask_label = mask_label
+        self.mask_to = mask_to
+
+    def __call__(self, data_dict):
+        if self.mask_label is not None:
+            assert "segment" in data_dict.keys()
+            known_label = data_dict["segment"].copy()
+            known_label[np.isin(known_label, self.mask_label)] = self.mask_to
+            assert not np.isin(known_label, self.mask_label).any()
+            data_dict["segment_known"] = known_label
         return data_dict
 
 

@@ -7,15 +7,225 @@ Please cite our work if the code is helpful to you.
 
 import numpy as np
 import torch
+from torch import nn
 import torch.distributed as dist
 import pointops
 from uuid import uuid4
 
 import pointcept.utils.comm as comm
-from pointcept.utils.misc import intersection_and_union_gpu
+from pointcept.utils.misc import (
+    aupr_and_auroc,
+    intersection_and_union_gpu,
+    is_pytorch_model,
+    selected_mask,
+)
 
 from .default import HookBase
 from .builder import HOOKS
+
+
+@HOOKS.register_module()
+class OpenSegEvaluator(HookBase):
+    def before_train(self):
+        self.num_classes = self.trainer.cfg.data.num_classes
+        self.ignore_index = self.trainer.cfg.data.ignore_index
+        self.unknown_label = self.trainer.cfg.unknown_label
+        self.mask_known = ~selected_mask(self.unknown_label, self.num_classes)
+
+    def after_epoch(self):
+        if self.trainer.cfg.evaluate:
+            self.eval()
+
+    def eval(self):
+        self.trainer.logger.info(">>>>>>>>>>>>>>>> Start Evaluation >>>>>>>>>>>>>>>>")
+        # torch.cuda.empty_cache()
+        self.trainer.model.eval()
+        if is_pytorch_model(self.trainer.recognizer):
+            self.trainer.recognizer.eval()
+        # all_score = []
+        # all_segment = []
+        for i, input_dict in enumerate(self.trainer.val_loader):
+            self.trainer.input_to_device(input_dict)
+            with torch.no_grad():
+                model_output, recognizer_output = self.trainer.model_forward(input_dict)
+            output = model_output["seg_logits"]
+            loss = model_output["loss"]
+            pred = output.max(1)[1]
+            segment = input_dict["segment"]
+            score = recognizer_output["score"]
+            # all_score.append(score.clone().detach().cpu())
+            # all_segment.append(segment.clone().detach().cpu())
+            if "origin_coord" in input_dict.keys():
+                raise NotImplementedError("Not used yet")
+                idx, _ = pointops.knn_query(
+                    1,
+                    input_dict["coord"].float(),
+                    input_dict["offset"].int(),
+                    input_dict["origin_coord"].float(),
+                    input_dict["origin_offset"].int(),
+                )
+                pred = pred[idx.flatten().long()]
+                segment = input_dict["origin_segment"]
+
+            self.trainer.storage.put_scalar("val_loss", loss.item())
+            self.segmentation_metric(pred, segment)
+            self.recognition_metric(score, segment)
+            info = "Test: [{iter}/{max_iter}] ".format(
+                iter=i + 1, max_iter=len(self.trainer.val_loader)
+            )
+            if "origin_coord" in input_dict.keys():
+                raise NotImplementedError("Not used yet")
+                info = "Interp. " + info
+            self.trainer.logger.info(
+                info
+                + "Loss {loss:.4f} ".format(
+                    iter=i + 1, max_iter=len(self.trainer.val_loader), loss=loss.item()
+                )
+            )
+
+        loss_avg = self.trainer.storage.history("val_loss").avg
+
+        intersection = self.trainer.storage.history("val_intersection").total
+        union = self.trainer.storage.history("val_union").total
+        target = self.trainer.storage.history("val_target").total
+        iou_class = intersection / (union + 1e-10)
+        acc_class = intersection / (target + 1e-10)
+        m_iou = np.mean(iou_class[self.mask_known])
+        m_acc = np.mean(acc_class[self.mask_known])
+        all_acc = sum(intersection[self.mask_known]) / (
+            sum(target[self.mask_known]) + 1e-10
+        )
+
+        self.trainer.logger.info(
+            "Val result: mIoU/mAcc/allAcc {:.4f}/{:.4f}/{:.4f}.".format(
+                m_iou, m_acc, all_acc
+            )
+        )
+        self.trainer.logger.info(
+            "Val result: aupr/auroc {:.4f}/{:.4f}".format(
+                self.trainer.storage.history("val_aupr").avg,
+                self.trainer.storage.history("val_auroc").avg,
+            )
+        )
+        for i in range(self.trainer.cfg.data.num_classes):
+            self.trainer.logger.info(
+                "Class_{idx}-{name} Result: iou/accuracy {iou:.4f}/{accuracy:.4f}".format(
+                    idx=i,
+                    name=self.trainer.cfg.data.names[i],
+                    iou=iou_class[i],
+                    accuracy=acc_class[i],
+                )
+            )
+
+        # all_score = comm.gather(all_score, dst=0)
+        # all_segment = comm.gather(all_segment, dst=0)
+        # if comm.is_main_process():
+        #     all_score = torch.cat([torch.cat(item, dim=0) for item in all_score], dim=0)
+        #     all_segment = torch.cat(
+        #         [torch.cat(item, dim=0) for item in all_segment], dim=0
+        #     )
+        #     all_aupr, all_auroc = aupr_and_auroc(
+        #         all_score, all_segment, self.unknown_label, self.ignore_index
+        #     )
+        #     self.trainer.logger.info(
+        #         "Val result: all scenes aupr/auroc {:.4f}/{:.4f}".format(
+        #             all_aupr,
+        #             all_auroc,
+        #         )
+        #     )
+
+        current_epoch = self.trainer.epoch + 1
+        if self.trainer.writer is not None:
+            self.trainer.writer.add_scalar("val/loss", loss_avg, current_epoch)
+            self.trainer.writer.add_scalar("val/mIoU", m_iou, current_epoch)
+            self.trainer.writer.add_scalar("val/mAcc", m_acc, current_epoch)
+            self.trainer.writer.add_scalar("val/allAcc", all_acc, current_epoch)
+            self.trainer.writer.add_scalar(
+                "val/aupr", self.trainer.storage.history("val_aupr").avg, current_epoch
+            )
+            self.trainer.writer.add_scalar(
+                "val/auroc",
+                self.trainer.storage.history("val_auroc").avg,
+                current_epoch,
+            )
+            # self.trainer.writer.add_scalar(
+            #     "val/aupr_allScene", aupr_all_mean, current_epoch
+            # )
+            # self.trainer.writer.add_scalar(
+            #     "val/auroc_allScene", auroc_all_mean, current_epoch
+            # )
+
+        self.trainer.logger.info("<<<<<<<<<<<<<<<<< End Evaluation <<<<<<<<<<<<<<<<<")
+        self.trainer.comm_info["current_metric_value"] = m_iou  # save for saver
+        self.trainer.comm_info["current_metric_name"] = "mIoU"  # save for saver
+
+    def after_train(self):
+        self.trainer.logger.info(
+            "Best {}: {:.4f}".format("mIoU", self.trainer.best_metric_value)
+        )
+
+    def segmentation_metric(self, pred, segment):
+        intersection, union, target = intersection_and_union_gpu(
+            pred,
+            segment,
+            self.num_classes,
+            self.ignore_index,
+        )
+        if comm.get_world_size() > 1:
+            dist.all_reduce(intersection)
+            dist.all_reduce(union)
+            dist.all_reduce(target)
+        intersection, union, target = (
+            intersection.cpu().numpy(),
+            union.cpu().numpy(),
+            target.cpu().numpy(),
+        )
+        self.trainer.storage.put_scalar("val_intersection", intersection)
+        self.trainer.storage.put_scalar("val_union", union)
+        self.trainer.storage.put_scalar("val_target", target)
+
+        # mIoU = np.mean(intersection[self.mask_known] / (union[self.mask_known] + 1e-10))
+        # mAcc = np.mean(
+        #     intersection[self.mask_known] / (target[self.mask_known] + 1e-10)
+        # )
+        # accuracy = sum(intersection[self.mask_known]) / (
+        #     sum(target[self.mask_known]) + 1e-10
+        # )
+        # info = "mIoU: {mIoU:.4f} mAcc: {mAcc:.4f} accuracy: {accuracy:.4f} ".format(
+        #     mIoU=mIoU, mAcc=mAcc, accuracy=accuracy
+        # )
+
+    def recognition_metric(self, score, segment):
+        aupr, auroc = aupr_and_auroc(
+            score,
+            segment,
+            self.unknown_label,
+            self.ignore_index,
+        )
+        aupr_auroc = {"device": comm.get_rank(), "aupr": aupr, "auroc": auroc}
+        aupr_auroc = comm.all_gather(aupr_auroc)
+        # fmt_aupr, fmt_auroc = [], []
+        for item in aupr_auroc:
+            aupr_i, auroc_i = item["aupr"], item["auroc"]
+            if aupr_i is None and auroc_i is None:
+                # fmt_aupr.append("None")
+                # fmt_auroc.append("None")
+                self.trainer.logger.debug(
+                    f"DEVICE: {item['device']} This batch contains no points of unknown classes."
+                )
+            else:
+                # fmt_aupr.append(format(aupr, ".4f"))
+                # fmt_auroc.append(format(auroc, ".4f"))
+                self.trainer.storage.put_scalar("val_aupr", aupr_i)
+                self.trainer.storage.put_scalar("val_auroc", auroc_i)
+
+        # if fmt_aupr != ["None"] * comm.get_world_size():
+        #     info = "aupr: {} ({:.4f}) auroc: {} ({:.4f}) ".format(
+        #         fmt_aupr,
+        #         self.trainer.storage.history("val_aupr").avg,
+        #         fmt_auroc,
+        #         self.trainer.storage.history("val_auroc").avg,
+        #     )
 
 
 @HOOKS.register_module()

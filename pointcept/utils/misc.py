@@ -10,7 +10,9 @@ import warnings
 from collections import abc
 import numpy as np
 import torch
+from torch import nn
 from importlib import import_module
+import sklearn.metrics
 
 
 class AverageMeter(object):
@@ -63,6 +65,22 @@ def intersection_and_union_gpu(output, target, k, ignore_index=-1):
     area_target = torch.histc(target, bins=k, min=0, max=k - 1)
     area_union = area_output + area_target - area_intersection
     return area_intersection, area_union, area_target
+
+
+def aupr_and_auroc(score, target, unknown_label, ignore_index=-1):
+    score = score.view(-1).cpu().numpy()
+    target = target.view(-1).cpu().numpy()
+    valid = target != ignore_index
+    score, target = score[valid], target[valid]
+    unknown_mask = np.isin(target, unknown_label)
+    if np.sum(unknown_mask) == 0:
+        aupr, auroc = None, None
+    else:
+        target[unknown_mask] = 1
+        target[~unknown_mask] = 0
+        aupr = sklearn.metrics.average_precision_score(target, score)
+        auroc = sklearn.metrics.roc_auc_score(target, score)
+    return aupr, auroc
 
 
 def make_dirs(dir_name):
@@ -159,6 +177,14 @@ def import_modules_from_strings(imports, allow_failed_imports=False):
     return imported
 
 
-class DummyClass:
-    def __init__(self):
-        pass
+def selected_mask(select, num_cls):
+    selected_cls = np.zeros(num_cls, dtype=bool)
+    selected_cls[select] = True
+    return selected_cls
+
+
+def is_pytorch_model(model):
+    return isinstance(
+        model,
+        (nn.Module, nn.parallel.DataParallel, nn.parallel.DistributedDataParallel),
+    )

@@ -11,6 +11,7 @@ import os
 import shutil
 import time
 import torch
+from torch import nn
 import torch.utils.data
 from collections import OrderedDict
 
@@ -21,6 +22,7 @@ else:
 from pointcept.utils.timer import Timer
 from pointcept.utils.comm import is_main_process, synchronize, get_world_size
 from pointcept.utils.cache import shared_dict
+from pointcept.utils.misc import is_pytorch_model
 
 import pointcept.utils.comm as comm
 from pointcept.engines.test import TESTERS
@@ -205,6 +207,71 @@ class CheckpointSaver(HookBase):
 
 
 @HOOKS.register_module()
+class OpensegCheckpointSaver(HookBase):
+    def __init__(self, save_freq=None):
+        self.save_freq = save_freq  # None or int, None indicate only save model last
+
+    def after_epoch(self):
+        if self.trainer.cfg.eval_only:
+            return
+        if is_main_process():
+            is_best = False
+            if self.trainer.cfg.evaluate:
+                current_metric_value = self.trainer.comm_info["current_metric_value"]
+                current_metric_name = self.trainer.comm_info["current_metric_name"]
+                if current_metric_value > self.trainer.best_metric_value:
+                    self.trainer.best_metric_value = current_metric_value
+                    is_best = True
+                    self.trainer.logger.info(
+                        "Best validation {} updated to: {:.4f}".format(
+                            current_metric_name, current_metric_value
+                        )
+                    )
+                self.trainer.logger.info(
+                    "Currently Best {}: {:.4f}".format(
+                        current_metric_name, self.trainer.best_metric_value
+                    )
+                )
+
+            filename = os.path.join(
+                self.trainer.cfg.save_path, "model", "model_last.pth"
+            )
+            self.trainer.logger.info("Saving checkpoint to: " + filename)
+            save_dict = {
+                "epoch": self.trainer.epoch + 1,
+                "state_dict": self.trainer.model.state_dict(),
+                "optimizer": self.trainer.optimizer.state_dict(),
+                "scheduler": self.trainer.scheduler.state_dict(),
+                "scaler": (
+                    self.trainer.scaler.state_dict()
+                    if self.trainer.cfg.enable_amp
+                    else None
+                ),
+                "best_metric_value": self.trainer.best_metric_value,
+            }
+            if is_pytorch_model(self.trainer.recognizer):
+                save_dict.update(
+                    {"recognizer_state": self.trainer.recognizer.state_dict()}
+                )
+            torch.save(save_dict, filename + ".tmp")
+            os.replace(filename + ".tmp", filename)
+            if is_best:
+                shutil.copyfile(
+                    filename,
+                    os.path.join(self.trainer.cfg.save_path, "model", "model_best.pth"),
+                )
+            if self.save_freq and (self.trainer.epoch + 1) % self.save_freq == 0:
+                shutil.copyfile(
+                    filename,
+                    os.path.join(
+                        self.trainer.cfg.save_path,
+                        "model",
+                        f"epoch_{self.trainer.epoch + 1}.pth",
+                    ),
+                )
+
+
+@HOOKS.register_module()
 class CheckpointLoader(HookBase):
     def __init__(self, keywords="", replacement=None, strict=False):
         self.keywords = keywords
@@ -249,6 +316,69 @@ class CheckpointLoader(HookBase):
                     self.trainer.scaler.load_state_dict(checkpoint["scaler"])
         else:
             self.trainer.logger.info(f"No weight found at: {self.trainer.cfg.weight}")
+
+
+@HOOKS.register_module()
+class OpensegCheckpointLoader(HookBase):
+    def __init__(self, keywords="", replacement=None, strict=False):
+        self.keywords = keywords
+        self.replacement = replacement if replacement is not None else keywords
+        self.strict = strict
+
+    def before_train(self):
+        self.trainer.logger.info("=> Loading checkpoint & weight ...")
+        if self.trainer.cfg.weight and os.path.isfile(self.trainer.cfg.weight):
+            self.trainer.logger.info(f"Loading weight at: {self.trainer.cfg.weight}")
+            checkpoint = torch.load(
+                self.trainer.cfg.weight,
+                map_location=lambda storage, loc: storage.cuda(),
+            )
+            self.trainer.logger.info(
+                f"Loading layer weights with keyword: {self.keywords}, "
+                f"replace keyword with: {self.replacement}"
+            )
+
+            weight = self.replace_key(checkpoint["state_dict"])
+            load_state_info = self.trainer.model.load_state_dict(
+                weight, strict=self.strict
+            )
+            self.trainer.logger.info(f"Missing keys: {load_state_info[0]}")
+
+            if checkpoint.get("recognizer_state", None) is not None:
+                recognizer_weight = self.replace_key(checkpoint["recognizer_state"])
+                load_state_info = self.trainer.recognizer.load_state_dict(
+                    recognizer_weight, strict=self.strict
+                )
+                self.trainer.logger.info(
+                    f"Missing recognizer keys: {load_state_info[0]}"
+                )
+
+            if self.trainer.cfg.resume:
+                self.trainer.logger.info(
+                    f"Resuming train at eval epoch: {checkpoint['epoch']}"
+                )
+                self.trainer.start_epoch = checkpoint["epoch"]
+                self.trainer.best_metric_value = checkpoint["best_metric_value"]
+                self.trainer.optimizer.load_state_dict(checkpoint["optimizer"])
+                self.trainer.scheduler.load_state_dict(checkpoint["scheduler"])
+                if self.trainer.cfg.enable_amp:
+                    self.trainer.scaler.load_state_dict(checkpoint["scaler"])
+        else:
+            self.trainer.logger.info(f"No weight found at: {self.trainer.cfg.weight}")
+
+    def replace_key(self, state_dict):
+        weight = OrderedDict()
+        for key, value in state_dict.items():
+            if not key.startswith("module."):
+                # if comm.get_world_size() > 1:
+                key = "module." + key  # xxx.xxx -> module.xxx.xxx
+            # Now all keys contain "module." no matter DDP or not.
+            if self.keywords in key:
+                key = key.replace(self.keywords, self.replacement)
+            if comm.get_world_size() == 1:
+                key = key[7:]  # module.xxx.xxx -> xxx.xxx
+            weight[key] = value
+        return weight
 
 
 @HOOKS.register_module()

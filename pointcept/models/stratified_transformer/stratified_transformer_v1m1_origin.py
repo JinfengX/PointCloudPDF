@@ -65,11 +65,21 @@ def get_indice_pairs(
     mask_mat = mask.unsqueeze(-1) & downsample_mask.unsqueeze(-2)  # [n, k, k]
     xyz_min = xyz.min(0)[0]
     if i % 2 == 0:
-        window_coord = (xyz[new_p2v_map] - xyz_min) // window_size  # [n, k, 3]
+        window_coord = torch.div(
+            xyz[new_p2v_map] - xyz_min,
+            window_size,
+            rounding_mode="trunc",
+        )
+        # window_coord = (xyz[new_p2v_map] - xyz_min) // window_size  # [n, k, 3]
     else:
-        window_coord = (
-            xyz[new_p2v_map] + 1 / 2 * window_size - xyz_min
-        ) // window_size  # [n, k, 3]
+        window_coord = torch.div(
+            xyz[new_p2v_map] - xyz_min + 1 / 2 * window_size,
+            window_size,
+            rounding_mode="trunc",
+        )
+        # window_coord = (
+        #     xyz[new_p2v_map] + 1 / 2 * window_size - xyz_min
+        # ) // window_size  # [n, k, 3]
 
     mask_mat_prev = (window_coord.unsqueeze(2) != window_coord.unsqueeze(1)).any(
         -1
@@ -271,9 +281,14 @@ class WindowAttention(nn.Module):
         # # Position embedding
         relative_position = xyz[index_0] - xyz[index_1]
         relative_position = torch.round(relative_position * 100000) / 100000
-        relative_position_index = (
-            relative_position + 2 * self.window_size - 0.0001
-        ) // self.quant_size
+        relative_position_index = torch.div(
+            relative_position + 2 * self.window_size - 1e-4,
+            self.quant_size,
+            rounding_mode="trunc",
+        )
+        # relative_position_index = (
+        #     relative_position + 2 * self.window_size - 0.0001
+        # ) // self.quant_size
         assert (relative_position_index >= 0).all()
         assert (relative_position_index <= 2 * self.quant_grid_length - 1).all()
 
