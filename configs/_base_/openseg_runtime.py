@@ -30,7 +30,7 @@ hooks = [
     # dict(type="PreciseEvaluator", test_last=False),
     
 ]
-model_hooks = dict() # [ ] update
+model_hooks = dict()
 
 # Trainer
 train = dict(type="OpensegTrainer")
