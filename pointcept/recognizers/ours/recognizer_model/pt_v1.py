@@ -4,7 +4,7 @@ import pointops
 from pointcept.models.builder import MODELS
 
 
-class TransitionUp(nn.Module): # [ ] one backbone one file
+class TransitionUp(nn.Module):
     def __init__(self, in_planes, out_planes=None):
         super().__init__()
         if out_planes is None:
@@ -70,7 +70,7 @@ class PTRecognizer(nn.Module):
             nn.Linear(planes[0], 1),
         )
 
-    def forward(self, backbone_features): # [ ] update
+    def forward(self, backbone_features):
         p1, _, o1 = backbone_features["enc1"]["forward_getOutput"]
         p2, _, o2 = backbone_features["enc2"]["forward_getOutput"]
         p3, _, o3 = backbone_features["enc3"]["forward_getOutput"]
@@ -90,11 +90,3 @@ class PTRecognizer(nn.Module):
         conf = self.confidence(r1)
 
         return conf
-
-
-class STRecognizer(nn.Module):
-    def __init__(self):
-        super().__init__()
-
-    def forward(self, backbone_features):
-        pass

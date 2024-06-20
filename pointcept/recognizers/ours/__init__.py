@@ -1,2 +1,2 @@
-from .pseudo_label_v1m1_base import *
-from .recognizers import *
+from .pseudo_label_v1m1_base import PseudoLabeler
+from .recognizer_model import *
