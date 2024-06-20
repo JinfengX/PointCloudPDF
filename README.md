@@ -195,6 +195,17 @@ python tools/train.py --config-file configs/scannet/openseg-pt-v1-0-our.py --num
 
 TODO
 
+- **StratifiedTransformer on ScannetV2 dataset**
+``` bash
+export PYTHONPATH=./ && export CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES}
+# open-set segmentation with msp method
+python tools/train.py --config-file configs/scannet/openseg-st-v1m1-0-origin-msp.py --num-gpus ${NUM_GPU} --options save_path=${SAVE_PATH}
+# open-set segmentation with our method (training from scratch)
+python tools/train.py --config-file configs/scannet/openseg-st-v1m1-0-origin-our.py --num-gpus ${NUM_GPU} --options save_path=${SAVE_PATH}
+# open-set segmentation with our method (resume training from msp checkpoint)
+python tools/train.py --config-file configs/scannet/openseg-st-v1m1-0-origin-our.py --num-gpus ${NUM_GPU} --options save_path=${SAVE_PATH} resume=True weight=${MSP_CHECKPOINT_PATH}
+```
+
 ## Evaluation
 The evaluation results can be obtained by appending parameter `eval_only` to training command. For example:
 ```bash
