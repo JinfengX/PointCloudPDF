@@ -58,17 +58,6 @@ recognizer = dict(
     adaptive_radius=False,
 )
 
-use_existing_nn=False,
-kp_ball_radius=0.02 * 5,
-kp_max_neighbor=64,
-condition_from="msp",
-beta=1.5,
-seed_from="ml",
-seed_range=0.15,
-num_seed=100,
-slide_window=True,
-adaptive_radius=False,
-
 
 # scheduler settings
 epoch = 3000
