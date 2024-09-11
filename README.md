@@ -221,7 +221,9 @@ Note that, these are not precise evaluation results. To test the model, please r
 TODO
 
 ## Trained checkpoints
-TODO
+| Dataset | Model |Checkpoints | AUPR | AUROC | mIoU |
+| :---: |:-----------:|:-----------:|:----------------:|:----:|:----:|
+| ScanNetv2 | StratifiedTransformer | [Google Drive](https://drive.google.com/file/d/15XuqMKJy4A625E63Cazc_a9I9LViCgMP/view?usp=sharing) | 68.9 | 91.3 | 64.5 |
 
 # Acknowledgements
 
