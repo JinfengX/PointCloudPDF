@@ -10,25 +10,26 @@ unknown_label = [5, 9]
 
 model_hooks = dict(
     type="ModelHook",
-    register_module_name=[
-        "enc1",
-        "enc2",
-        "enc3",
-        "enc4",
-        "enc5",
-        "dec5.1",  # the last layer of dec sequence
-        "dec4.1",
-        "dec3.1",
-        "dec2.1",
-        "dec1.1",
-    ],
-    hook_and_action=["forward_getOutput"] * 10,
+    hook_config={
+        "backbone.enc1":"forward_output",
+        "backbone.enc2":"forward_output",
+        "backbone.enc3":"forward_output",
+        "backbone.enc4":"forward_output",
+        "backbone.enc5":"forward_output",
+        "backbone.dec5.1":"forward_output",  # the last layer of dec sequence
+        "backbone.dec4.1":"forward_output",
+        "backbone.dec3.1":"forward_output",
+        "backbone.dec2.1":"forward_output",
+        "backbone.dec1.1":"forward_output",
+        "backbone":"forward_output",
+        },
+    exclude_clone={"backbone":"forward_output"}
 )
 
 
 # model settings
 model = dict(
-    type="OpenSegmentor",
+    type="DefaultSegmentor",
     backbone=dict(
         type="PointTransformer-Seg50",
         in_channels=6,
@@ -39,7 +40,7 @@ model = dict(
 
 # recognizer settings
 recognizer = dict(
-    type="PseudoLabeler",
+    type="PointPdf-v1m1",
     recognizer=dict(type="PointTransformer-Recognizer"),
     criteria=[dict(type="CrossEntropyLoss", loss_weight=1.0, ignore_index=-1)],
     loss_weight=0.01,

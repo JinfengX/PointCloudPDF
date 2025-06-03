@@ -42,45 +42,33 @@ class OpenSegEvaluator(HookBase):
         self.trainer.model.eval()
         if is_pytorch_model(self.trainer.recognizer):
             self.trainer.recognizer.eval()
-        # all_score = []
-        # all_segment = []
+        all_score = []
+        all_segment = []
         for i, input_dict in enumerate(self.trainer.val_loader):
             self.trainer.input_to_device(input_dict)
+            self.trainer.label_rename(input_dict)
             with torch.no_grad():
-                model_output, recognizer_output = self.trainer.model_forward(input_dict)
+                model_output = self.trainer.model(input_dict)
+                recognizer_output = self.trainer.recognizer(input_dict)
             output = model_output["seg_logits"]
             loss = model_output["loss"]
             pred = output.max(1)[1]
-            segment = input_dict["segment"]
+            segment = input_dict["segment_oracle"]
             score = recognizer_output["score"]
-            # all_score.append(score.clone().detach().cpu())
-            # all_segment.append(segment.clone().detach().cpu())
+            all_score.append(score.clone().detach().cpu())
+            all_segment.append(segment.clone().detach().cpu())
             if "origin_coord" in input_dict.keys():
                 raise NotImplementedError("Not used yet")
-                idx, _ = pointops.knn_query(
-                    1,
-                    input_dict["coord"].float(),
-                    input_dict["offset"].int(),
-                    input_dict["origin_coord"].float(),
-                    input_dict["origin_offset"].int(),
-                )
-                pred = pred[idx.flatten().long()]
-                segment = input_dict["origin_segment"]
 
             self.trainer.storage.put_scalar("val_loss", loss.item())
-            self.segmentation_metric(pred, segment)
+            self.segmentation_metric(pred, segment, self.num_classes, self.ignore_index)
             self.recognition_metric(score, segment)
-            info = "Test: [{iter}/{max_iter}] ".format(
-                iter=i + 1, max_iter=len(self.trainer.val_loader)
-            )
+
             if "origin_coord" in input_dict.keys():
                 raise NotImplementedError("Not used yet")
-                info = "Interp. " + info
+
             self.trainer.logger.info(
-                info
-                + "Loss {loss:.4f} ".format(
-                    iter=i + 1, max_iter=len(self.trainer.val_loader), loss=loss.item()
-                )
+                f"Test: [{i + 1}/{len(self.trainer.val_loader)}] Loss {loss.item():.4f}"
             )
 
         loss_avg = self.trainer.storage.history("val_loss").avg
@@ -148,28 +136,41 @@ class OpenSegEvaluator(HookBase):
                 self.trainer.storage.history("val_auroc").avg,
                 current_epoch,
             )
+            # self.trainer.writer.add_scalar("val/aupr_allScene", all_aupr, current_epoch)
             # self.trainer.writer.add_scalar(
-            #     "val/aupr_allScene", aupr_all_mean, current_epoch
-            # )
-            # self.trainer.writer.add_scalar(
-            #     "val/auroc_allScene", auroc_all_mean, current_epoch
+            #     "val/auroc_allScene", all_auroc, current_epoch
             # )
 
         self.trainer.logger.info("<<<<<<<<<<<<<<<<< End Evaluation <<<<<<<<<<<<<<<<<")
-        self.trainer.comm_info["current_metric_value"] = m_iou  # save for saver
-        self.trainer.comm_info["current_metric_name"] = "mIoU"  # save for saver
+        if comm.is_main_process():
+            self.trainer.comm_info["current_metric_value"] = [
+                m_iou,
+                self.trainer.storage.history("val_aupr").avg,
+                self.trainer.storage.history("val_auroc").avg,
+            ]  # save for saver
+            self.trainer.comm_info["current_metric_name"] = [
+                "mIoU",
+                "aupr",
+                "auroc",
+            ]  # save for saver
 
     def after_train(self):
-        self.trainer.logger.info(
-            "Best {}: {:.4f}".format("mIoU", self.trainer.best_metric_value)
-        )
+        if comm.is_main_process():
+            for m_i, metric_name in enumerate(
+                self.trainer.comm_info["current_metric_name"]
+            ):
+                self.trainer.logger.info(
+                    "Best {}: {:.4f}".format(
+                        metric_name, self.trainer.best_metric_value[m_i]
+                    )
+                )
 
-    def segmentation_metric(self, pred, segment):
+    def segmentation_metric(self, pred, segment, num_classes, ignore_index):
         intersection, union, target = intersection_and_union_gpu(
             pred,
             segment,
-            self.num_classes,
-            self.ignore_index,
+            num_classes,
+            ignore_index,
         )
         if comm.get_world_size() > 1:
             dist.all_reduce(intersection)
@@ -226,6 +227,170 @@ class OpenSegEvaluator(HookBase):
         #         fmt_auroc,
         #         self.trainer.storage.history("val_auroc").avg,
         #     )
+
+
+@HOOKS.register_module()
+class IncrSegEvaluator(OpenSegEvaluator):
+    def __init__(self):
+        super().__init__()
+
+    def before_train(self):
+        self.base_num_classes = self.trainer.cfg.data.num_classes
+        self.remap_num_classes = self.base_num_classes + len(
+            self.trainer.cfg.incr_label_remap
+        )
+        self.ignore_index = self.trainer.cfg.data.ignore_index
+        self.unknown_label = self.trainer.cfg.unknown_label
+        self.mask_known = ~selected_mask(self.unknown_label, self.base_num_classes)
+        self.incr_label_idx = list(self.trainer.cfg.incr_label_remap.values())
+        self.mask_incr_remap = ~selected_mask(
+            self.unknown_label, self.remap_num_classes
+        )
+        self.map_reverse = {v: k for k, v in self.trainer.cfg.incr_label_remap.items()}
+
+    def after_epoch(self):
+        if self.trainer.cfg.evaluate:
+            self.eval()
+
+    def eval(self):
+        self.trainer.logger.info(">>>>>>>>>>>>>>>> Start Evaluation >>>>>>>>>>>>>>>>")
+        if is_pytorch_model(self.trainer.incr_learner):
+            self.trainer.incr_learner.eval()
+        for i, input_dict in enumerate(self.trainer.val_loader):
+            self.trainer.input_to_device(input_dict)
+            with torch.no_grad():
+                incr_output = self.trainer.incr_learner(input_dict)
+            incr_seg_logits = incr_output["seg_logits"]
+            incr_loss = incr_output["loss"]
+            incr_pred = incr_seg_logits.max(1)[1]
+            segment = input_dict["segment_incr_remap"]
+            if "origin_coord" in input_dict.keys():
+                raise NotImplementedError("Not used yet")
+
+            self.trainer.storage.put_scalar("val_loss", incr_loss.item())
+            self.segmentation_metric(
+                incr_pred, segment, self.remap_num_classes, self.ignore_index
+            )
+
+            if "origin_coord" in input_dict.keys():
+                raise NotImplementedError("Not used yet")
+
+            self.trainer.logger.info(
+                f"Test: [{i + 1}/{len(self.trainer.val_loader)}] Loss {incr_loss.item():.4f}"
+            )
+
+        loss_avg = self.trainer.storage.history("val_loss").avg
+
+        intersection = self.trainer.storage.history("val_intersection").total
+        union = self.trainer.storage.history("val_union").total
+        target = self.trainer.storage.history("val_target").total
+        iou_class, acc_class, metric_known, metric_incr, metric_remap = (
+            self.incr_segmentation_metric(intersection, union, target)
+        )
+
+        # log metrics
+        self.trainer.logger.info(
+            f"Val result: mIoU/mAcc/Acc known {metric_known['mIoU']:.4f}/{metric_known['mAcc']:.4f}/{metric_known['Acc']:.4f}."
+        )
+        self.trainer.logger.info(
+            f"Val result: mIoU/mAcc/Acc incr {metric_incr['mIoU']:.4f}/{metric_incr['mAcc']:.4f}/{metric_incr['Acc']:.4f}."
+        )
+        self.trainer.logger.info(
+            f"Val result: mIoU/mAcc/Acc remap {metric_remap['mIoU']:.4f}/{metric_remap['mAcc']:.4f}/{metric_remap['Acc']:.4f}."
+        )
+        for cls_i, (cls_iou, cls_acc) in enumerate(zip(iou_class, acc_class)):
+            class_name = self.trainer.cfg.data.names[
+                self.map_reverse[cls_i] if cls_i >= self.base_num_classes else cls_i
+            ]
+            prefix = "Increment " if cls_i >= self.base_num_classes else ""
+
+            self.trainer.logger.info(
+                f"{prefix}Class_{cls_i}-{class_name} Result: iou/accuracy {cls_iou:.4f}/{cls_acc:.4f}"
+            )
+
+        current_epoch = self.trainer.epoch + 1
+        if self.trainer.writer is not None:
+            self.trainer.writer.add_scalar("val/loss", loss_avg, current_epoch)
+            self.trainer.writer.add_scalar(
+                "val/mIoU", metric_known["mIoU"], current_epoch
+            )
+            self.trainer.writer.add_scalar(
+                "val/mAcc", metric_known["mAcc"], current_epoch
+            )
+            self.trainer.writer.add_scalar(
+                "val/allAcc", metric_known["Acc"], current_epoch
+            )
+            self.trainer.writer.add_scalar(
+                "val/mIoU_incr", metric_incr["mIoU"], current_epoch
+            )
+            self.trainer.writer.add_scalar(
+                "val/mAcc_incr", metric_incr["mAcc"], current_epoch
+            )
+            self.trainer.writer.add_scalar(
+                "val/allAcc_incr", metric_incr["Acc"], current_epoch
+            )
+            self.trainer.writer.add_scalar(
+                "val/mIoU_remap", metric_remap["mIoU"], current_epoch
+            )
+            self.trainer.writer.add_scalar(
+                "val/mAcc_remap", metric_remap["mAcc"], current_epoch
+            )
+            self.trainer.writer.add_scalar(
+                "val/allAcc_remap", metric_remap["Acc"], current_epoch
+            )
+
+        self.trainer.logger.info("<<<<<<<<<<<<<<<<< End Evaluation <<<<<<<<<<<<<<<<<")
+        self.trainer.comm_info["current_metric_value"] = [
+            metric_known["mIoU"],
+            metric_incr["mIoU"],
+            metric_remap["mIoU"],
+        ]  # save for saver
+        self.trainer.comm_info["current_metric_name"] = [
+            "mIoU_known",
+            "mIoU_incr",
+            "mIoU_remap",
+        ]
+
+    def after_train(self):
+        if comm.is_main_process():
+            for m_i, metric_name in enumerate(
+                self.trainer.comm_info["current_metric_name"]
+            ):
+                self.trainer.logger.info(
+                    "Best {}: {:.4f}".format(
+                        metric_name, self.trainer.best_metric_value[m_i]
+                    )
+                )
+
+    def incr_segmentation_metric(self, intersection, union, target):
+        iou_class = intersection / (union + 1e-10)
+        acc_class = intersection / (target + 1e-10)
+
+        m_iou_known = np.mean(iou_class[: self.base_num_classes][self.mask_known])
+        m_acc_known = np.mean(acc_class[: self.base_num_classes][self.mask_known])
+        acc_known = sum(intersection[: self.base_num_classes][self.mask_known]) / sum(
+            target[: self.base_num_classes][self.mask_known] + 1e-10
+        )
+
+        m_iou_incr = np.mean(iou_class[self.incr_label_idx])
+        m_acc_incr = np.mean(acc_class[self.incr_label_idx])
+        acc_incr = sum(intersection[self.incr_label_idx]) / (
+            sum(target[self.incr_label_idx]) + 1e-10
+        )
+
+        m_iou_remap = np.mean(iou_class[self.mask_incr_remap])
+        m_acc_remap = np.mean(acc_class[self.mask_incr_remap])
+        acc_remap = sum(intersection[self.mask_incr_remap]) / (
+            sum(target[self.mask_incr_remap]) + 1e-10
+        )
+
+        return (
+            iou_class,
+            acc_class,
+            {"mIoU": m_iou_known, "mAcc": m_acc_known, "Acc": acc_known},
+            {"mIoU": m_iou_incr, "mAcc": m_acc_incr, "Acc": acc_incr},
+            {"mIoU": m_iou_remap, "mAcc": m_acc_remap, "Acc": acc_remap},
+        )
 
 
 @HOOKS.register_module()

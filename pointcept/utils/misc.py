@@ -68,8 +68,12 @@ def intersection_and_union_gpu(output, target, k, ignore_index=-1):
 
 
 def aupr_and_auroc(score, target, unknown_label, ignore_index=-1):
-    score = score.view(-1).cpu().numpy()
-    target = target.view(-1).cpu().numpy()
+    if isinstance(score, torch.Tensor):
+        score = score.cpu().numpy()
+    if isinstance(target, torch.Tensor):
+        target = target.cpu().numpy()
+    score = score.reshape(-1)
+    target = target.reshape(-1)
     valid = target != ignore_index
     score, target = score[valid], target[valid]
     unknown_mask = np.isin(target, unknown_label)
@@ -188,3 +192,14 @@ def is_pytorch_model(model):
         model,
         (nn.Module, nn.parallel.DataParallel, nn.parallel.DistributedDataParallel),
     )
+
+
+def is_parallel_model(model):
+    return isinstance(
+        model, (nn.parallel.DataParallel, nn.parallel.DistributedDataParallel)
+    )
+
+
+def unwrap_model(model):
+    """Unwrap model if it is wrapped by DataParallel or DistributedDataParallel."""
+    return getattr(model, "module", model)

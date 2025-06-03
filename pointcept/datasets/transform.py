@@ -1157,6 +1157,28 @@ class MaskLabel(object):
         return data_dict
 
 
+@TRANSFORMS.register_module()
+class RemapLabel(object):
+    def __init__(self, remap_dict):
+        self.remap_dict = remap_dict
+
+    def __call__(self, data_dict):
+        if self.remap_dict is not None:
+            assert "segment" in data_dict
+            segment = data_dict["segment"]
+            lookup_size = max(segment.max(), max(self.remap_dict.keys())) + 1
+            lookup = np.full((lookup_size + 1,), -1)
+            for old_label, new_label in self.remap_dict.items():
+                lookup[old_label] = new_label
+            remapped_labels = np.where(lookup[segment] != -1, lookup[segment], segment)
+            assert not np.isin(remapped_labels, list(self.remap_dict.keys())).any()
+            data_dict["segment_incr_remap"] = remapped_labels
+            remapped_labels_inc = np.where(lookup[segment] != -1, lookup[segment], -1)
+            assert not np.isin(remapped_labels_inc, list(self.remap_dict.keys())).any()
+            data_dict["segment_incr"] = remapped_labels_inc
+        return data_dict
+
+
 class Compose(object):
     def __init__(self, cfg=None):
         self.cfg = cfg if cfg is not None else []

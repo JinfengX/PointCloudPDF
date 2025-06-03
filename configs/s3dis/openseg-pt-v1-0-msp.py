@@ -10,13 +10,21 @@ unknown_label = [5, 9]
 
 # model settings
 model = dict(
-    type="OpenSegmentor",
+    type="DefaultSegmentor",
     backbone=dict(
         type="PointTransformer-Seg50",
         in_channels=6,
         num_classes=13,
     ),
     criteria=[dict(type="CrossEntropyLoss", loss_weight=1.0, ignore_index=-1)],
+)
+
+model_hooks = dict(
+    type="ModelHook",
+    hook_config={
+        "backbone": "forward_output",
+    },
+    exclude_clone={"backbone": "forward_output"},
 )
 
 # recognizer settings

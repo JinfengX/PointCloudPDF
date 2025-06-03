@@ -172,12 +172,12 @@ export PYTHONPATH=./ && export CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES}
 # open-set segmentation with msp method
 python tools/train.py --config-file configs/s3dis/openseg-pt-v1-0-msp.py --num-gpus ${NUM_GPU} --options save_path=${SAVE_PATH}
 # open-set segmentation with our method (training from scratch)
-python tools/train.py --config-file configs/s3dis/openseg-pt-v1-0-our.py --num-gpus ${NUM_GPU} --options save_path=${SAVE_PATH}
+python tools/train.py --config-file configs/s3dis/openseg-pt-v1-0-pointpdf-v1m1-base.py --num-gpus ${NUM_GPU} --options save_path=${SAVE_PATH}
 ```
 The msp method does not make changes to the backbone, which only differs from semantic segmentation in the evaluation process. Our method trains open-set segmentation model by finetuning the semantic segmentation model. Therefore, our method can resume training from msp checkpoint directly:
 ```bash
 # open-set segmentation with our method (resume training from msp checkpoint)
-python tools/train.py --config-file configs/s3dis/openseg-pt-v1-0-our.py --num-gpus ${NUM_GPU} --options save_path=${SAVE_PATH} resume=True weight=${MSP_CHECKPOINT_PATH}
+python tools/train.py --config-file configs/s3dis/openseg-pt-v1-0-pointpdf-v1m1-base.py --num-gpus ${NUM_GPU} --options save_path=${SAVE_PATH} resume=True weight=${MSP_CHECKPOINT_PATH}
 ```
 
 - **PointTransformer on ScannetV2 dataset**
@@ -186,9 +186,9 @@ export PYTHONPATH=./ && export CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES}
 # open-set segmentation with msp method
 python tools/train.py --config-file configs/scannet/openseg-pt-v1-0-msp.py --num-gpus ${NUM_GPU} --options save_path=${SAVE_PATH}
 # open-set segmentation with our method (training from scratch)
-python tools/train.py --config-file configs/scannet/openseg-pt-v1-0-our.py --num-gpus ${NUM_GPU} --options save_path=${SAVE_PATH}
+python tools/train.py --config-file configs/scannet/openseg-pt-v1-0-pointpdf-v1m1-base.py --num-gpus ${NUM_GPU} --options save_path=${SAVE_PATH}
 # open-set segmentation with our method (resume training from msp checkpoint)
-python tools/train.py --config-file configs/scannet/openseg-pt-v1-0-our.py --num-gpus ${NUM_GPU} --options save_path=${SAVE_PATH} resume=True weight=${MSP_CHECKPOINT_PATH}
+python tools/train.py --config-file configs/scannet/openseg-pt-v1-0-pointpdf-v1m1-base.py --num-gpus ${NUM_GPU} --options save_path=${SAVE_PATH} resume=True weight=${MSP_CHECKPOINT_PATH}
 ```
 
 - **StratifiedTransformer on S3DIS dataset**
@@ -201,9 +201,9 @@ export PYTHONPATH=./ && export CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES}
 # open-set segmentation with msp method
 python tools/train.py --config-file configs/scannet/openseg-st-v1m1-0-origin-msp.py --num-gpus ${NUM_GPU} --options save_path=${SAVE_PATH}
 # open-set segmentation with our method (training from scratch)
-python tools/train.py --config-file configs/scannet/openseg-st-v1m1-0-origin-our.py --num-gpus ${NUM_GPU} --options save_path=${SAVE_PATH}
+python tools/train.py --config-file configs/scannet/openseg-st-v1m1-0-origin-pointpdf-v1m1-base.py --num-gpus ${NUM_GPU} --options save_path=${SAVE_PATH}
 # open-set segmentation with our method (resume training from msp checkpoint)
-python tools/train.py --config-file configs/scannet/openseg-st-v1m1-0-origin-our.py --num-gpus ${NUM_GPU} --options save_path=${SAVE_PATH} resume=True weight=${MSP_CHECKPOINT_PATH}
+python tools/train.py --config-file configs/scannet/openseg-st-v1m1-0-origin-pointpdf-v1m1-base.py --num-gpus ${NUM_GPU} --options save_path=${SAVE_PATH} resume=True weight=${MSP_CHECKPOINT_PATH}
 ```
 
 ## Evaluation
@@ -213,12 +213,16 @@ export PYTHONPATH=./ && export CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES}
 # evaluate the msp method
 python tools/train.py --config-file configs/scannet/openseg-pt-v1-0-msp.py --num-gpus ${NUM_GPU} --options save_path=${SAVE_PATH} weight=${CHECKPOINT_PATH} eval_only=True
 # evaluate our method
-python tools/train.py --config-file configs/scannet/openseg-pt-v1-0-our.py --num-gpus ${NUM_GPU} --options weight=${MSP_CHECKPOINT_PATH} save_path=${SAVE_PATH} eval_only=True
+python tools/train.py --config-file configs/scannet/openseg-pt-v1-0-pointpdf-v1m1-base.py --num-gpus ${NUM_GPU} --options weight=${MSP_CHECKPOINT_PATH} save_path=${SAVE_PATH} eval_only=True
 ```
 Note that, these are not precise evaluation results. To test the model, please refer to [Test](#test).
 
 ## Test
-TODO
+To perform precise test:
+```bash
+# test our method on s3dis dataset
+python tools/test.py --config-file configs/s3dis/openseg-pt-v1-0-pointpdf-v1m1-base.py --num-gpus ${NUM_GPU} --options weight=${MSP_CHECKPOINT_PATH} save_path=${SAVE_PATH}
+```
 
 ## Trained checkpoints
 | Dataset | Model |Checkpoints | AUPR | AUROC | mIoU |

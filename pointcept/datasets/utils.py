@@ -49,6 +49,7 @@ def point_collate_fn(batch, mix_prob=0):
     if "offset" in batch.keys():
         # Mix3d (https://arxiv.org/pdf/2110.02210.pdf)
         if random.random() < mix_prob:
+            batch['offset_ori'] = batch['offset'].clone()
             batch["offset"] = torch.cat(
                 [batch["offset"][1:-1:2], batch["offset"][-1].unsqueeze(0)], dim=0
             )

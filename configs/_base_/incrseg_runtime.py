@@ -1,5 +1,10 @@
-weight = None  # path to model weight
-resume = False  # whether to resume training process
+base_ckpt = None  # path to base model weight
+resume = False  # whether to resume incremental training process from base weight
+incr_ckpt = None  # path to incremental model weight
+incr_resume = False  # whether to resume incremental training process
+load_base_weight_to_incr_learner = True # whether to load base model weight to incremental model
+base_weight_process_func = "reserve_matched" # method to adapt base model weights for incremental model loading
+
 evaluate = True  # evaluate after each epoch training process
 test_only = False  # test process
 
@@ -22,17 +27,25 @@ param_dicts = None  # example: param_dicts = [dict(keyword="block", lr_scale=0.1
 
 # hook
 hooks = [
-    dict(type="OpenSegCheckpointLoader"),
+    dict(type="IncrSegCheckpointLoader"),
     dict(type="IterationTimer", warmup_iter=2),
     dict(type="InformationWriter"),
-    dict(type="OpenSegEvaluator"),
-    dict(type="OpenSegCheckpointSaver", save_freq=5),
+    dict(type="IncrSegEvaluator"),
+    dict(
+        type="IncrSegCheckpointSaver",
+        save_freq=5,
+        tracked_best_metrics=[
+            "mIoU_known",
+            "mIoU_incr",
+            "mIoU_remap",
+        ],
+        tracked_epoch=float("inf"),
+    ),
     # dict(type="PreciseEvaluator", test_last=False),
-    
 ]
 
 # Trainer
-train = dict(type="OpenSegTrainer")
+train = dict(type="IncrSegTrainer")
 
 # Tester
-test = dict(type="OpenSegTester", verbose=True)
+test = dict(type="IncrSegTester", verbose=True)

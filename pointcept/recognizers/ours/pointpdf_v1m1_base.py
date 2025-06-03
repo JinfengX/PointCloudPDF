@@ -24,8 +24,8 @@ from scipy.sparse import csr_matrix
 from scipy.sparse.csgraph import minimum_spanning_tree, connected_components
 
 
-@RECOGNIZER.register_module()
-class PseudoLabeler(nn.Module):
+@RECOGNIZER.register_module("PointPdf-v1m1")
+class PointPdfV1(nn.Module):
     def __init__(
         self,
         recognizer,
@@ -69,12 +69,10 @@ class PseudoLabeler(nn.Module):
 
         self.parallel_processing = Parallel(n_jobs=4)
 
-    def forward(self, model_output):
-        input_dict = self.input_dict
-        seg_logits = model_output["seg_logits"]
-        backbone_features = self.model_hooks
+    def forward(self, input_dict):
+        seg_logits = self.model_hooks["backbone"]["forward_output"]
         self.trigger_operation()
-        score = self.recognizer(backbone_features)
+        score = self.recognizer(self.model_hooks)
         # train
         if self.training:
             if self.epoch < self.start_epoch:
@@ -89,7 +87,7 @@ class PseudoLabeler(nn.Module):
             # batch = offset2batch(input_dict["offset"])
             # color = torch.ones(len(input_dict["coord"]), 3) * 0.7
             # color[
-            #     torch.isin(input_dict["segment"], torch.tensor([4, 7, 14, 16]).cuda()),
+            #     torch.isin(input_dict["segment_oracle"], torch.tensor([4, 7, 14, 16]).cuda()),
             #     0,
             # ] = 1  # [4, 7, 14, 16] for scannet, [5, 9] for s3dis
             # for i, o in enumerate(input_dict["offset"]):
@@ -99,7 +97,7 @@ class PseudoLabeler(nn.Module):
             #         f".tmp/visualizations/{i}_unknown.ply",
             #     )
 
-            segment_pseudo = input_dict["segment_known"].clone()
+            segment_pseudo = input_dict["segment"].clone()
             segment_pseudo[pseudo_mask] = self.num_classes
             loss = (
                 self.criteria(torch.cat([seg_logits, score], -1), segment_pseudo)
@@ -109,7 +107,7 @@ class PseudoLabeler(nn.Module):
                 score = torch.cat([seg_logits, score], -1).softmax(-1)[:, -1]
             return dict(score=score, loss=loss)
         # eval
-        elif "segment_known" in input_dict.keys():
+        elif "segment" in input_dict.keys():
             if self.softmax_score:
                 score = torch.cat([seg_logits, score], -1).softmax(-1)[:, -1]
             return dict(score=score)
@@ -345,6 +343,7 @@ class PseudoLabeler(nn.Module):
                 mst_edge_weight, gmm_means[gmm_idx], gmm_cov[gmm_idx], "left", 2.0
             )
             mst_adj_matrix.data[mst_edge_outlier_filter] = 0
+            mst_adj_matrix.eliminate_zeros()
 
             # find outlier sub graph
             num_subgraph, node_graph_label = connected_components(

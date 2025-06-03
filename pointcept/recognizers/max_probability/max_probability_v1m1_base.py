@@ -14,8 +14,8 @@ class MaxProbability(object):
         else:
             raise ValueError(f"Unknown MaxProbability method {method}")
 
-    def __call__(self, model_output):
-        seg_logits = model_output["seg_logits"]
+    def __call__(self, input_dict):
+        seg_logits = self.model_hooks["backbone"]["forward_output"]
         score = -self.prob_func(seg_logits)
         return dict(score=score)
 

@@ -5,6 +5,9 @@ Author: Xiaoyang Wu (xiaoyang.wu.cs@gmail.com)
 Please cite our work if the code is helpful to you.
 """
 
+from collections import defaultdict
+from contextlib import ExitStack, nullcontext
+
 import os
 import sys
 import weakref
@@ -25,13 +28,15 @@ from .hooks import HookBase, build_hooks
 import pointcept.utils.comm as comm
 from pointcept.datasets import build_dataset, point_collate_fn, collate_fn
 from pointcept.models import build_model
-from pointcept.recognizers.builder import build_recognizer
+from pointcept.models.utils import build_model_hook
+from pointcept.recognizers import build_recognizer
+from pointcept.incrLearner.builder import build_incremental_learner
 from pointcept.utils.logger import get_root_logger
-from pointcept.utils.optimizer import build_optimizer
+from pointcept.utils.optimizer import build_optimizer, build_optimizer_from_named_params
 from pointcept.utils.scheduler import build_scheduler
 from pointcept.utils.events import EventStorage
 from pointcept.utils.registry import Registry
-from pointcept.utils.misc import is_pytorch_model
+from pointcept.utils.misc import is_pytorch_model, unwrap_model
 
 
 TRAINERS = Registry("trainers")
@@ -305,62 +310,41 @@ class MultiDatasetTrainer(Trainer):
         return train_loader
 
 
-@TRAINERS.register_module("OpensegTrainer")
-class OpensegTrainer(Trainer):
+@TRAINERS.register_module("OpenSegTrainer")
+class OpenSegTrainer(Trainer):
     def __init__(self, cfg):
         super().__init__(cfg)
+        self.best_metric_value = defaultdict(self.default_best_metric_value)
+        self.other_metric_snapshot = defaultdict(self.default_other_metric_snapshot)
         self.cfg.eval_only = cfg.get("eval_only", False)
         self.logger.info("=> Building model hooks ...")
-        self.model_hooks = (
-            self.build_model_hook() if 'type' in self.cfg.model_hooks.keys() else None
-        )
+        self.model_hooks = self.build_model_hook()
         self.logger.info("=> Building recognizer ...")
         self.recognizer = self.build_recognizer()
+        self.optimizer = self.build_open_optimizer()
+        # rebuild the scheduler after updating the optimizer.
+        self.scheduler = self.build_scheduler()
 
     def train(self):
-        with EventStorage() as self.storage:
-            # => before train
-            self.before_train()
-            self.logger.info(">>>>>>>>>>>>>>>> Start Training >>>>>>>>>>>>>>>>")
-            for self.epoch in range(self.start_epoch, self.max_epoch):
-                if not self.cfg.eval_only:
-                    # => before epoch
-                    # TODO: optimize to iteration based
-                    if comm.get_world_size() > 1:
-                        self.train_loader.sampler.set_epoch(self.epoch)
-                    self.model.train()
-                    if is_pytorch_model(self.recognizer):
-                        self.recognizer.train()
-                    if isinstance(self.recognizer, nn.parallel.DistributedDataParallel):
-                        self.recognizer.module.epoch = self.epoch
-                    else:
-                        self.recognizer.epoch = self.epoch
-                    self.data_iterator = enumerate(self.train_loader)
-                    self.before_epoch()
-                    # => run_epoch
-                    for (
-                        self.comm_info["iter"],
-                        self.comm_info["input_dict"],
-                    ) in self.data_iterator:
-                        # => before_step
-                        self.before_step()
-                        # => run_step
-                        self.run_step()
-                        # => after_step
-                        self.after_step()
-                # => after epoch
-                self.after_epoch()
-            # => after train
-            self.after_train()
+        with ExitStack() as stack:
+            stack.enter_context(self.model_hooks)
+            if self.cfg.eval_only:
+                self.storage = stack.enter_context(EventStorage())
+                super().before_train()
+                self.logger.info(">>>>>>>>>>>>>>>> Start Evaluation >>>>>>>>>>>>>>>>")
+                for self.epoch in range(self.start_epoch, self.max_epoch):
+                    super().after_epoch()
+            else:
+                super().train()
 
     def run_step(self):
         input_dict = self.comm_info["input_dict"]
-        self.input_to_device(input_dict)
+        for key in input_dict.keys():
+            if isinstance(input_dict[key], torch.Tensor):
+                input_dict[key] = input_dict[key].cuda(non_blocking=True)
         with torch.cuda.amp.autocast(enabled=self.cfg.enable_amp):
-            model_output, recognizer_output = self.model_forward(input_dict)
-            loss = model_output["loss"]
-            if recognizer_output.get("loss", None) is not None:
-                loss = loss + recognizer_output["loss"]
+            output_dict = self.model_forward(input_dict)
+            loss = output_dict["loss"]
         self.optimizer.zero_grad()
         if self.cfg.enable_amp:
             self.scaler.scale(loss).backward()
@@ -378,47 +362,48 @@ class OpensegTrainer(Trainer):
             self.scheduler.step()
         if self.cfg.empty_cache:
             torch.cuda.empty_cache()
+        self.comm_info["model_output_dict"] = output_dict
 
-        # remove tensor from dict
-        keys_to_remove = []
-        for key in model_output.keys():
-            if key != "loss":
-                keys_to_remove.append(key)
-        for key in keys_to_remove:
-            model_output.pop(key)
-        # add loss_recognizer to model_output
-        if recognizer_output.get("loss", None) is not None:
-            model_output.update({"loss_rec": recognizer_output["loss"]})
-        self.comm_info["model_output_dict"] = model_output
+    def before_epoch(self):
+        self.model.train()
+        if is_pytorch_model(self.recognizer):
+            self.recognizer.train()
+        if self.recognizer:
+            unwrap_model(self.recognizer).set_epoch(self.epoch)
+        super().before_epoch()
 
     def model_forward(self, input_dict):
+        self.label_rename(input_dict)
         model_output = self.model(input_dict)
-        if hasattr(self.recognizer, "need_input") and self.recognizer.need_input:
-            self.recognizer.input_dict = input_dict
-        elif isinstance(self.recognizer, nn.parallel.DistributedDataParallel):
-            if (
-                hasattr(self.recognizer.module, "need_input")
-                and self.recognizer.module.need_input
-            ):
-                self.recognizer.module.input_dict = input_dict
-        recognizer_output = self.recognizer(model_output)
-        return model_output, recognizer_output
+        recognizer_output = self.recognizer(input_dict)
+        if recognizer_output.get("loss", None) is not None:
+            model_output["loss"] = model_output["loss"] + recognizer_output["loss"]
+            model_output.update({"loss_rec": recognizer_output["loss"]})
+        return model_output
 
     def input_to_device(self, input_dict):
         for key in input_dict.keys():
             if isinstance(input_dict[key], torch.Tensor):
                 input_dict[key] = input_dict[key].cuda(non_blocking=True)
 
-    def build_model_hook(self):
-        model_hooks = build_hooks([self.cfg.model_hooks])[0]
+    def label_rename(self, input_dict):
+        # switch known segment to all segment for open-set segmentation
+        if "segment_known" in input_dict:
+            input_dict.update({"segment_oracle": input_dict["segment"]})
+            input_dict["segment"] = input_dict["segment_known"]
 
-        if comm.get_world_size() == 1:
-            backbone = self.model.backbone
-        else:
-            backbone = self.model.module.backbone
-        # for hook in model_hooks: # for hook list
-        # hook.register_hooks(backbone)
-        model_hooks.register_hooks(backbone)
+    def build_open_optimizer(self):
+        all_named_params = dict(self.model.named_parameters())
+        if is_pytorch_model(self.recognizer):
+            all_named_params.update(dict(self.recognizer.named_parameters()))
+        return build_optimizer_from_named_params(
+            self.cfg.optimizer, all_named_params, self.cfg.param_dicts
+        )
+
+    def build_model_hook(self):
+        model_hooks = build_model_hook(self.cfg.model_hooks)
+        model_hooks.set_logger(self.logger)
+        model_hooks.set_model(self.model)
         self.logger.info(model_hooks)
         return model_hooks
 
@@ -506,3 +491,94 @@ class OpensegTrainer(Trainer):
                 collate_fn=collate_fn,
             )
         return val_loader
+
+    @staticmethod
+    def default_best_metric_value():
+        return -torch.inf
+
+    @staticmethod
+    def default_other_metric_snapshot():
+        return None
+
+
+@TRAINERS.register_module("IncrSegTrainer")
+class IncrSegTrainer(OpenSegTrainer):
+    def __init__(self, cfg):
+        super().__init__(cfg)
+        self.logger.info("=> Building incremental learner ...")
+        self.incr_learner = self.build_incremental_learner()
+        self.optimizer = self.build_incr_optimizer()
+        # rebuild the scheduler after updating the optimizer.
+        self.scheduler = self.build_scheduler()
+
+    def before_epoch(self):
+        if is_pytorch_model(self.incr_learner):
+            self.incr_learner.train()
+        super().before_epoch()
+
+    def model_forward(self, input_dict):
+        model_output = self.incr_learner(input_dict)
+        return model_output
+
+    def build_incremental_learner(self):
+        incr_learner = build_incremental_learner(self.cfg.incremental_learner)
+        if is_pytorch_model(incr_learner):
+            if self.cfg.sync_bn:
+                incr_learner = nn.SyncBatchNorm.convert_sync_batchnorm(incr_learner)
+            n_parameters = sum(
+                p.numel() for p in incr_learner.parameters() if p.requires_grad
+            )
+            self.logger.info(f"Num params: {n_parameters}")
+            incr_learner = create_ddp_model(
+                incr_learner.cuda(),
+                broadcast_buffers=False,
+                find_unused_parameters=self.cfg.find_unused_parameters,
+            )
+        if hasattr(unwrap_model(incr_learner), "need_teacher_model"):
+            self.model.eval()
+            unwrap_model(incr_learner).inject_teacher_model(self.model)
+            unwrap_model(incr_learner).teacher_model_hooks = self.model_hooks
+        return incr_learner
+
+    def build_model(self):
+        # use the same model for incremental learner
+        model = build_model(self.cfg.model)
+        n_parameters = sum(p.numel() for p in model.parameters() if p.requires_grad)
+        # logger.info(f"Model: \n{self.model}")
+        self.logger.info(f"Num params: {n_parameters}")
+        model = model.cuda()
+
+        return model
+
+    def build_incr_optimizer(self):
+        all_named_params = {
+            name: param
+            for name, param in self.incr_learner.named_parameters()
+            if "teacher_model" not in name
+        }
+        return build_optimizer_from_named_params(
+            self.cfg.optimizer, all_named_params, self.cfg.param_dicts
+        )
+
+    # def build_model_hook(self):
+    #     return nullcontext()
+
+    def build_recognizer(self):
+        return None
+
+
+# class _ModelWrapper:
+#     def __init__(self, trainer):
+#         self.trainer = trainer
+#         self._original_model = trainer.model
+
+#     def __call__(self, input_dict):
+#         # Call the trainer's model_forward method
+#         return self.trainer.model_forward(input_dict)
+
+#     def __getattr__(self, name):
+#         return getattr(self._original_model, name)
+
+#     @classmethod
+#     def __instancecheck__(cls, instance) -> bool:
+#         return isinstance(instance.original_model, nn.Module)

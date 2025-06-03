@@ -5,35 +5,35 @@ from pointcept.models.utils.structure import Point
 from .builder import MODELS, build_model
 
 
-@MODELS.register_module()
-class OpenSegmentor(nn.Module):
-    def __init__(self, backbone=None, criteria=None):
-        super().__init__()
-        self.backbone = build_model(backbone)
-        self.criteria = build_criteria(criteria)
+# @MODELS.register_module()
+# class OpenSegmentor(nn.Module):
+#     def __init__(self, backbone=None, criteria=None):
+#         super().__init__()
+#         self.backbone = build_model(backbone)
+#         self.criteria = build_criteria(criteria)
 
-    def forward(self, input_dict):
-        if "condition" in input_dict.keys():
-            # PPT (https://arxiv.org/abs/2308.09718)
-            # currently, only support one batch one condition
-            input_dict["condition"] = input_dict["condition"][0]
-        seg_logits = self.backbone(input_dict)
-        if isinstance(seg_logits, dict):
-            assert "seg_logits" in seg_logits.keys()
-            rtn_dict = seg_logits
-        else:
-            rtn_dict = dict(seg_logits=seg_logits)
-        # train
-        if self.training:
-            rtn_dict["loss"] = self.criteria(seg_logits, input_dict["segment_known"])
-            return rtn_dict
-        # eval
-        elif "segment_known" in input_dict.keys():
-            rtn_dict["loss"] = self.criteria(seg_logits, input_dict["segment_known"])
-            return rtn_dict
-        # test
-        else:
-            return dict(seg_logits=seg_logits)
+#     def forward(self, input_dict):
+#         if "condition" in input_dict.keys():
+#             # PPT (https://arxiv.org/abs/2308.09718)
+#             # currently, only support one batch one condition
+#             input_dict["condition"] = input_dict["condition"][0]
+#         seg_logits = self.backbone(input_dict)
+#         if isinstance(seg_logits, dict):
+#             assert "seg_logits" in seg_logits.keys()
+#             rtn_dict = seg_logits
+#         else:
+#             rtn_dict = dict(seg_logits=seg_logits)
+#         # train
+#         if self.training:
+#             rtn_dict["loss"] = self.criteria(seg_logits, input_dict["segment"])
+#             return rtn_dict
+#         # eval
+#         elif "segment_known" in input_dict.keys():
+#             rtn_dict["loss"] = self.criteria(seg_logits, input_dict["segment"])
+#             return rtn_dict
+#         # test
+#         else:
+#             return dict(seg_logits=seg_logits)
 
 
 @MODELS.register_module()

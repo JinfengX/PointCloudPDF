@@ -43,16 +43,16 @@ class STRecognizer(nn.Module):
             nn.Linear(channels[0], 1),
         )
 
-    def forward(self, backbone_features):
+    def forward(self, model_hooks):
         in_feats, out_feats = [], []
-        in_feats.append(backbone_features["upsamples.0"]["forward_getInput"])
-        in_feats.append(backbone_features["upsamples.1"]["forward_getInput"])
-        in_feats.append(backbone_features["upsamples.2"]["forward_getInput"])
-        in_feats.append(backbone_features["upsamples.3"]["forward_getInput"])
-        out_feats.append(backbone_features["upsamples.0"]["forward_getOutput"])
-        out_feats.append(backbone_features["upsamples.1"]["forward_getOutput"])
-        out_feats.append(backbone_features["upsamples.2"]["forward_getOutput"])
-        out_feats.append(backbone_features["upsamples.3"]["forward_getOutput"])
+        in_feats.append(model_hooks["backbone.upsamples.0"]["forward_input"])
+        in_feats.append(model_hooks["backbone.upsamples.1"]["forward_input"])
+        in_feats.append(model_hooks["backbone.upsamples.2"]["forward_input"])
+        in_feats.append(model_hooks["backbone.upsamples.3"]["forward_input"])
+        out_feats.append(model_hooks["backbone.upsamples.0"]["forward_output"])
+        out_feats.append(model_hooks["backbone.upsamples.1"]["forward_output"])
+        out_feats.append(model_hooks["backbone.upsamples.2"]["forward_output"])
+        out_feats.append(model_hooks["backbone.upsamples.3"]["forward_output"])
 
         feats = in_feats[0][0]
         for i, upsample in enumerate(self.upsamples):

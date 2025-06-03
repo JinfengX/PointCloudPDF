@@ -12,7 +12,7 @@ unknown_label = [4, 7, 14, 16]
 
 # model settings
 model = dict(
-    type="OpenSegmentor",
+    type="DefaultSegmentor",
     backbone=dict(
         type="ST-v1m1",
         downsample_scale=4,
@@ -43,19 +43,20 @@ model = dict(
 
 model_hooks = dict(
     type="ModelHook",
-    register_module_name=[
-        "upsamples.0",
-        "upsamples.1",
-        "upsamples.2",
-        "upsamples.3",
-    ],
-    hook_and_action=[["forward_getInput", "forward_getOutput"]] * 4,
+    register_module_name={
+        "backbone.upsamples.0": ["forward_input", "forward_output"],
+        "backbone.upsamples.1": ["forward_input", "forward_output"],
+        "backbone.upsamples.2": ["forward_input", "forward_output"],
+        "backbone.upsamples.3": ["forward_input", "forward_output"],
+        "backbone": "forward_output",
+    },
+    exclude_clone={"backbone": "forward_output"},
 )
 
 # recognizer settings
 # recognizer settings
 recognizer = dict(
-    type="PseudoLabeler",
+    type="PointPdf-v1m1",
     recognizer=dict(
         type="ST-v1m1-Recognizer",
         up_k=3,

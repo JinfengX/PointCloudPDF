@@ -1,2 +1,1 @@
-from .pseudo_label_v1m1_base import PseudoLabeler
-from .recognizer_model import *
+from .pointpdf_v1m1_base import PointPdfV1
