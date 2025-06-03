@@ -54,7 +54,6 @@ model_hooks = dict(
 )
 
 # recognizer settings
-# recognizer settings
 recognizer = dict(
     type="PointPdf-v1m1",
     recognizer=dict(
