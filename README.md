@@ -193,7 +193,13 @@ python tools/train.py --config-file configs/scannet/openseg-pt-v1-0-pointpdf-v1m
 
 - **StratifiedTransformer on S3DIS dataset**
 
-TODO
+``` bash
+export PYTHONPATH=./ && export CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES}
+# open-set segmentation with msp method
+python tools/train.py --config-file configs/s3dis/openseg-st-v1m1-0-origin-msp.py --num-gpus ${NUM_GPU} --options save_path=${SAVE_PATH}
+# open-set segmentation with our method (training from scratch)
+python tools/train.py --config-file configs/s3dis/openseg-st-v1m1-0-origin-pointpdf-v1m1-base.py --num-gpus ${NUM_GPU} --options save_path=${SAVE_PATH}
+```
 
 - **StratifiedTransformer on ScannetV2 dataset**
 ``` bash
