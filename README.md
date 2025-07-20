@@ -14,24 +14,30 @@ by [Jinfeng Xu](https://jinfengx.github.io/), Siyuan Yang, [Xianzhi Li](https://
 </div>
 
 
-<div style="text-align: center;">
+<!-- <div style="text-align: center;">
     <img style="border-radius: 0.3125em;
     width: 98%;
     box-shadow: 0 2px 4px 0 rgba(34,36,38,.12),0 2px 10px 0 rgba(34,36,38,.08);" 
     src=./docs/teaser.png alt="">
     <br>
-</div>
+</div> -->
+<p align="center">
+  <img src="./docs/teaser.png" width="95%">
+</p>
 
 
 ## Introduction
-**PointCloudPDF** is the repository for our Computer Vision and Pattern Recognition (CVPR) 2024 paper 'PDF: A Probability-Driven Framework for Open World 3D Point Cloud Semantic Segmentation'.
-In this paper, we propose a Probability-Driven Framework (PDF)
-for open world semantic segmentation that includes (i) a lightweight U-decoder branch to identify unknown classes by estimating the uncertainties, (ii) a flexible pseudo-labeling scheme to supply geometry features along with probability distribution features of unknown classes by generating pseudo labels, and (iii) an incremental knowledge distillation strategy to incorporate novel classes into the existing knowledge base gradually.
-Our framework enables the model to behave like human beings, which could recognize unknown objects and incrementally learn them with the corresponding knowledge.
-Experimental results on the S3DIS and ScanNetv2 datasets demonstrate that the proposed PDF outperforms other methods by a large margin in both important tasks of open world semantic segmentation.
+
+Official PyTorch implementation of "[PDF: A Probability-Driven Framework for Open World 3D Point Cloud Semantic Segmentation](https://arxiv.org/abs/2404.00979)".
+
+**This work has been accepted to CVPR 2024.**
+
+> **Abstract:** *Existing point cloud semantic segmentation networks cannot identify unknown classes and update their knowledge, due to a closed-set and static perspective of the real world, which would induce the intelligent agent to make bad decisions.
+To address this problem, we propose a Probability-Driven Framework (PDF) for open world semantic segmentation that includes (i) a lightweight U-decoder branch to identify unknown classes by estimating the uncertainties, (ii) a flexible pseudo-labeling scheme to supply geometry features along with probability distribution features of unknown classes by generating pseudo labels, and (iii) an incremental knowledge distillation strategy to incorporate novel classes into the existing knowledge base gradually.
+Our framework enables the model to behave like human beings, which could recognize unknown objects and incrementally learn them with the corresponding knowledge. Experimental results on the S3DIS and ScanNetv2 datasets demonstrate that the proposed PDF outperforms other methods by a large margin in both important tasks of open world semantic segmentation.*
 
 
-## Code structure
+## Code Structure
 We organize our code based on the [Pointcept](https://github.com/Pointcept/Pointcept) which is a powerful and flexible codebase for point cloud perception research.
 The directory structure of our project looks like this:
 ```
@@ -74,19 +80,36 @@ The directory structure of our project looks like this:
 
 ## Environment
 ``` bash
+# Create a new conda environment
 conda create -n pointpdf python=3.8
 conda activate pointpdf
-conda install ninja==1.11.1 -c conda-forge 
-conda install pytorch==1.12.1 torchvision==0.13.1 torchaudio==0.12.1 cudatoolkit=11.3 -c pytorch 
-conda install scipy==1.9.1 scikit-learn==1.1.2 numpy==1.19.5 mkl==2024.0 -c conda-forge 
-conda install pyg pytorch-cluster pytorch-scatter pytorch-sparse -c pyg 
-conda install sharedarray tensorboard tensorboardx yapf addict einops plyfile termcolor timm -c conda-forge --no-update-deps 
-conda install h5py pyyaml -c anaconda --no-update-deps 
+
+# Install ninja
+conda install ninja==1.11.1 -c conda-forge
+
+# Install PyTorch and related packages
+conda install pytorch==1.12.1 torchvision==0.13.1 torchaudio==0.12.1 cudatoolkit=11.3 -c pytorch
+
+# Install scientific computing packages
+conda install scipy==1.9.1 scikit-learn==1.1.2 numpy==1.19.5 mkl==2024.0 -c conda-forge
+
+# Install PYG (PyTorch Geometric) and related packages
+conda install pyg pytorch-cluster pytorch-scatter pytorch-sparse -c pyg
+
+# Install additional dependencies
+conda install sharedarray tensorboard tensorboardx yapf addict einops plyfile termcolor timm==1.0.8 -c conda-forge --no-update-deps
+conda install h5py pyyaml -c anaconda --no-update-deps
+
+# Install Python packages via pip
 pip install spconv-cu113
 pip install torch-points3d
 pip install open3d  # for visualization
+
+# Fix sharedarray version (overwrite with pip)
 pip uninstall sharedarray
 pip install sharedarray==3.2.1
+
+# Compile pointops and pointops2 libraries
 cd libs/pointops
 python setup.py install
 cd ../..
@@ -230,7 +253,7 @@ To perform precise test:
 python tools/test.py --config-file configs/s3dis/openseg-pt-v1-0-pointpdf-v1m1-base.py --num-gpus ${NUM_GPU} --options weight=${MSP_CHECKPOINT_PATH} save_path=${SAVE_PATH}
 ```
 
-## Trained checkpoints
+## Trained Checkpoints
 | Dataset | Model |Checkpoints | AUPR | AUROC | mIoU |
 | :---: |:-----------:|:-----------:|:----------------:|:----:|:----:|
 | ScanNetv2 | StratifiedTransformer | [Google Drive](https://drive.google.com/file/d/15XuqMKJy4A625E63Cazc_a9I9LViCgMP/view?usp=sharing) | 68.9 | 91.3 | 64.5 |
