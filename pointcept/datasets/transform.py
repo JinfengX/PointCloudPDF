@@ -1159,23 +1159,51 @@ class MaskLabel(object):
 
 @TRANSFORMS.register_module()
 class RemapLabel(object):
-    def __init__(self, remap_dict):
+    def __init__(self, remap_dict, remap_select=None, ignore_index=-1):
         self.remap_dict = remap_dict
+        self.remap_select = remap_select
+        self.ignore_index = ignore_index
 
     def __call__(self, data_dict):
         if self.remap_dict is not None:
             assert "segment" in data_dict
             segment = data_dict["segment"]
+
+            # Create lookup table
             lookup_size = max(segment.max(), max(self.remap_dict.keys())) + 1
-            lookup = np.full((lookup_size + 1,), -1)
-            for old_label, new_label in self.remap_dict.items():
-                lookup[old_label] = new_label
-            remapped_labels = np.where(lookup[segment] != -1, lookup[segment], segment)
-            assert not np.isin(remapped_labels, list(self.remap_dict.keys())).any()
-            data_dict["segment_incr_remap"] = remapped_labels
-            remapped_labels_inc = np.where(lookup[segment] != -1, lookup[segment], -1)
-            assert not np.isin(remapped_labels_inc, list(self.remap_dict.keys())).any()
-            data_dict["segment_incr"] = remapped_labels_inc
+            lookup_remap = np.arange(lookup_size)  # Initialize with identity mapping
+            lookup_inc = np.full(lookup_size, self.ignore_index, dtype=segment.dtype)
+            
+            if self.remap_select is not None:
+                remap_keys = set(self.remap_dict.keys())
+                selected_keys = set(self.remap_select)
+                unselected_keys = remap_keys - selected_keys
+                
+                for old_label in selected_keys:
+                    if old_label in self.remap_dict:
+                        new_label = self.remap_dict[old_label]
+                        lookup_remap[old_label] = new_label
+                        lookup_inc[old_label] = new_label
+                
+                if unselected_keys:
+                    unselected_array = np.array(list(unselected_keys))
+                    lookup_remap[unselected_array] = self.ignore_index
+                    lookup_inc[unselected_array] = self.ignore_index
+            else:
+                old_labels = np.array(list(self.remap_dict.keys()))
+                new_labels = np.array([self.remap_dict[k] for k in old_labels])
+                lookup_remap[old_labels] = new_labels
+                lookup_inc[old_labels] = new_labels
+
+            data_dict["segment_incr_remap"] = lookup_remap[segment]
+            data_dict["segment_incr"] = lookup_inc[segment]
+            assert not np.isin(
+                data_dict["segment_incr_remap"], np.array(list(self.remap_dict.keys()))
+            ).any(), "Remapping failed, some labels are not remapped correctly."
+            assert not np.isin(
+                data_dict["segment_incr"], np.array(list(self.remap_dict.keys()))
+            ).any(), "Remapping failed, some labels are not remapped correctly."
+            
         return data_dict
 
 
