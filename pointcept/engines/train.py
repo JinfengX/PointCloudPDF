@@ -514,6 +514,8 @@ class IncrSegTrainer(OpenSegTrainer):
     def before_epoch(self):
         if is_pytorch_model(self.incr_learner):
             self.incr_learner.train()
+        if unwrap_model(self.incr_learner).need_teacher_model:
+            unwrap_model(self.incr_learner).teacher_model.eval()
         super().before_epoch()
 
     def model_forward(self, input_dict):
@@ -535,7 +537,6 @@ class IncrSegTrainer(OpenSegTrainer):
                 find_unused_parameters=self.cfg.find_unused_parameters,
             )
         if hasattr(unwrap_model(incr_learner), "need_teacher_model"):
-            self.model.eval()
             unwrap_model(incr_learner).inject_teacher_model(self.model)
             unwrap_model(incr_learner).teacher_model_hooks = self.model_hooks
         return incr_learner
@@ -565,6 +566,7 @@ class IncrSegTrainer(OpenSegTrainer):
 
     def build_recognizer(self):
         return None
+
 
 
 # class _ModelWrapper:
