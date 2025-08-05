@@ -17,7 +17,7 @@ import torch.utils.data
 from torch_scatter import scatter_mean
 
 from pointcept.datasets.transform import RemapLabel
-from pointcept.incrLearner.builder import build_incremental_learner
+from pointcept.incrLearners.builder import build_incremental_learner
 
 from .defaults import create_ddp_model
 import pointcept.utils.comm as comm
@@ -278,7 +278,7 @@ class OpenSegTester(TesterBase):
             )
 
             aupr, auroc = aupr_and_auroc(
-                score, segment, self.cfg.unknown_label, self.cfg.ignore_index
+                score, segment, self.cfg.unknown_label, self.cfg.data.ignore_index
             )
             aupr_auroc_dict = {"device": comm.get_rank(), "aupr": aupr, "auroc": auroc}
             aupr_auroc_dict = comm.all_gather(aupr_auroc_dict)
@@ -504,25 +504,18 @@ class OpenSegTester(TesterBase):
 class IncrSegTester(TesterBase):
     def __init__(self, cfg, **kwargs):
         super().__init__(cfg, **kwargs)
-        self.model_hooks = self.build_model_hook()
+        from pointcept.engines.hooks.evaluator import IncrSegEvaluator
+
+        class MockTrainer:
+            def __init__(self, cfg):
+                self.cfg = cfg
+
         self.incr_learner = self.build_incremental_learner()
 
-        self.base_num_classes = self.cfg.data.num_classes
-        self.remap_num_classes = self.base_num_classes + len(self.cfg.incr_label_remap)
-        self.mask_known = ~selected_mask(self.cfg.unknown_label, self.base_num_classes)
-        self.incr_label_idx = np.fromiter(
-            self.cfg.incr_label_remap.values(), dtype=np.int64
-        )
-        self.mask_incr_remap = ~selected_mask(
-            self.cfg.unknown_label, self.remap_num_classes
-        )
-        self.map_reverse = {v: k for k, v in self.cfg.incr_label_remap.items()}
+        self.trainer = MockTrainer(cfg)
+        IncrSegEvaluator.before_train(self)
 
     def test(self):
-        with self.model_hooks:
-            self.test_run()
-
-    def test_run(self):
         assert self.test_loader.batch_size == 1
         logger = get_root_logger()
         logger.info(">>>>>>>>>>>>>>>> Start Evaluation >>>>>>>>>>>>>>>>")
@@ -659,17 +652,16 @@ class IncrSegTester(TesterBase):
             )
 
             incr_valid = mask[self.base_num_classes :].any()
-            iou_incr = (
-                np.mean(iou_class[self.incr_label_idx[mask[self.base_num_classes :]]])
-                if incr_valid
-                else -1.0
-            )
+            incr_mask_indices = np.array(self.incr_label_idx)[
+                mask[
+                    self.base_num_classes : self.base_num_classes
+                    + len(self.incr_label_idx)
+                ]
+            ]
+            iou_incr = np.mean(iou_class[incr_mask_indices]) if incr_valid else -1.0
             acc_incr = (
-                sum(intersection[self.incr_label_idx[mask[self.base_num_classes :]]])
-                / (
-                    sum(target[self.incr_label_idx[mask[self.base_num_classes :]]])
-                    + 1e-10
-                )
+                sum(intersection[incr_mask_indices])
+                / (sum(target[incr_mask_indices]) + 1e-10)
                 if incr_valid
                 else -1.0
             )
@@ -852,13 +844,6 @@ class IncrSegTester(TesterBase):
             find_unused_parameters=self.cfg.find_unused_parameters,
         )
         return model
-
-    def build_model_hook(self):
-        model_hooks = build_model_hook(self.cfg.model_hooks)
-        model_hooks.set_logger(self.logger)
-        model_hooks.set_model(self.model)
-        self.logger.info(model_hooks)
-        return model_hooks
 
     def build_incremental_learner(self):
         incr_learner = build_incremental_learner(self.cfg.incremental_learner)
