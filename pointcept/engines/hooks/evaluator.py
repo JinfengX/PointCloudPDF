@@ -241,10 +241,22 @@ class IncrSegEvaluator(OpenSegEvaluator):
         )
         self.ignore_index = self.trainer.cfg.data.ignore_index
         self.unknown_label = self.trainer.cfg.unknown_label
-        self.mask_known = ~selected_mask(self.unknown_label, self.base_num_classes)
-        self.incr_label_idx = list(self.trainer.cfg.incr_label_remap.values())
+        self.mask_known = ~selected_mask(
+            list(self.trainer.cfg.incr_label_remap.keys()),
+            self.base_num_classes,
+        )
+        self.incr_label_idx = self.trainer.cfg.incr_label_select
         self.mask_incr_remap = ~selected_mask(
-            self.unknown_label, self.remap_num_classes
+            list(self.trainer.cfg.incr_label_remap.keys())
+            + list(self.trainer.cfg.incr_label_remap.values()),
+            self.remap_num_classes,
+        ) | selected_mask(
+            [
+                v
+                for k, v in self.trainer.cfg.incr_label_remap.items()
+                if k in self.incr_label_idx
+            ],
+            self.remap_num_classes,
         )
         self.map_reverse = {v: k for k, v in self.trainer.cfg.incr_label_remap.items()}
 

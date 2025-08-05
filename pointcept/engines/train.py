@@ -339,9 +339,7 @@ class OpenSegTrainer(Trainer):
 
     def run_step(self):
         input_dict = self.comm_info["input_dict"]
-        for key in input_dict.keys():
-            if isinstance(input_dict[key], torch.Tensor):
-                input_dict[key] = input_dict[key].cuda(non_blocking=True)
+        self.input_to_device(input_dict)
         with torch.cuda.amp.autocast(enabled=self.cfg.enable_amp):
             output_dict = self.model_forward(input_dict)
             loss = output_dict["loss"]
@@ -365,7 +363,7 @@ class OpenSegTrainer(Trainer):
         self.comm_info["model_output_dict"] = output_dict
 
     def before_epoch(self):
-        self.model.train()
+        # self.model.train()
         if is_pytorch_model(self.recognizer):
             self.recognizer.train()
         if self.recognizer:

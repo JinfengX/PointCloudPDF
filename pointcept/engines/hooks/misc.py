@@ -568,7 +568,7 @@ class OpenSegCheckpointLoader(HookBase):
 @HOOKS.register_module()
 class IncrSegCheckpointLoader(OpenSegCheckpointLoader):
     def __init__(self, keywords="", replacement=None, strict=False):
-        super().__init__()
+        super().__init__(keywords, replacement, strict)
 
     def before_train(self):
         self.logger = self.trainer.logger
@@ -631,7 +631,7 @@ class IncrSegCheckpointLoader(OpenSegCheckpointLoader):
         self.logger.info(
             f"Loading weights with keyword: {self.keywords}, replace keyword with: {self.replacement}"
         )
-        weight = self.replace_key(weight, self.keywords, self.replace_key)
+        weight = self.replace_key(weight, self.keywords, self.replacement)
         load_state_info = model.load_state_dict(weight, strict=self.strict)
         self.logger.info(f"Missing keys: {load_state_info[0]}")
 
