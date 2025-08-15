@@ -804,33 +804,28 @@ class IncrSegTester(TesterBase):
             )
 
             logger.info(
-                "Val result: mIoU/mAcc/allAcc known {:.4f}/{:.4f}/{:.4f}"
-                "Val result: mIoU/mAcc/allAcc incr {:.4f}/{:.4f}/{:.4f}"
-                "Val result: mIoU/mAcc/allAcc remap {:.4f}/{:.4f}/{:.4f}".format(
-                    mIoU_known,
-                    mAcc_known,
-                    allAcc_known,
-                    mIoU_incr,
-                    mAcc_incr,
-                    allAcc_incr,
-                    mIoU_remap,
-                    mAcc_remap,
-                    allAcc_remap,
+                "Val result: mIoU/mAcc/allAcc known {:.4f}/{:.4f}/{:.4f}".format(
+                    mIoU_known, mAcc_known, allAcc_known
                 )
             )
-            for i in range(self.cfg.data.num_classes):
+            logger.info(
+                "Val result: mIoU/mAcc/allAcc incr {:.4f}/{:.4f}/{:.4f}".format(
+                    mIoU_incr, mAcc_incr, allAcc_incr
+                )
+            )
+            logger.info(
+                "Val result: mIoU/mAcc/allAcc remap {:.4f}/{:.4f}/{:.4f}".format(
+                    mIoU_remap, mAcc_remap, allAcc_remap
+                )
+            )
+            for cls_i, (cls_iou, cls_acc) in enumerate(zip(iou_class, accuracy_class)):
                 class_name = self.cfg.data.names[
-                    self.map_reverse[i] if i >= self.base_num_classes else i
+                    self.map_reverse[cls_i] if cls_i >= self.base_num_classes else cls_i
                 ]
-                prefix = "Increment " if i >= self.base_num_classes else ""
+                prefix = "Increment " if cls_i >= self.base_num_classes else ""
+
                 logger.info(
-                    "{prefix}Class_{idx} - {name} Result: iou/accuracy {iou:.4f}/{accuracy:.4f}".format(
-                        prefix=prefix,
-                        idx=i,
-                        name=class_name,
-                        iou=iou_class[i],
-                        accuracy=accuracy_class[i],
-                    )
+                    f"{prefix}Class_{cls_i}-{class_name} Result: iou/accuracy {cls_iou:.4f}/{cls_acc:.4f}"
                 )
             logger.info("<<<<<<<<<<<<<<<<< End Evaluation <<<<<<<<<<<<<<<<<")
 

@@ -27,3 +27,6 @@ class MaxProbability(object):
     def ml(self, seg_logits):
         ml = seg_logits.max(dim=-1)[0]
         return ml
+
+    def set_epoch(self, epoch):
+        self.epoch = epoch

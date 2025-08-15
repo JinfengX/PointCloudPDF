@@ -359,6 +359,21 @@ class IncrSegCheckpointSaver(HookBase):
                 "best_metric_value": self.trainer.best_metric_value,
                 "other_metric_snapshot": self.trainer.other_metric_snapshot,
             }
+            if hasattr(self.trainer, "recognizer") and is_pytorch_model(
+                self.trainer.recognizer
+            ):
+                save_dict.update(
+                    {"recognizer_state": self.trainer.recognizer.state_dict()}
+                )
+                trainer_recognizer = unwrap_model(self.trainer.recognizer)
+                if hasattr(trainer_recognizer, "class_means"):
+                    save_dict.update(
+                        {"recognizer_class_means": trainer_recognizer.class_means}
+                    )
+                if hasattr(trainer_recognizer, "class_covs"):
+                    save_dict.update(
+                        {"recognizer_class_covs": trainer_recognizer.class_covs}
+                    )
             self.save_checkpoint(self.trainer.epoch + 1, save_dict)
             self.save_best_checkpoint(
                 flags_best,
@@ -526,8 +541,16 @@ class OpenSegCheckpointLoader(HookBase):
                     trainer_recognizer.class_means = checkpoint[
                         "recognizer_class_means"
                     ]
+                else:
+                    self.trainer.logger.warning(
+                        "No recognizer class means found in checkpoint."
+                    )
                 if checkpoint.get("recognizer_class_covs", None) is not None:
                     trainer_recognizer.class_covs = checkpoint["recognizer_class_covs"]
+                else:
+                    self.trainer.logger.warning(
+                        "No recognizer class covariances found in checkpoint."
+                    )
 
             if self.trainer.cfg.resume:
                 self.trainer.logger.info(
