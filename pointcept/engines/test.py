@@ -132,6 +132,7 @@ class OpenSegTester(TesterBase):
         self.mask_known = ~selected_mask(
             self.cfg.unknown_label, self.cfg.data.num_classes
         )
+        self.dim_pred = self.cfg.data.num_classes
 
     def test(self):
         with self.model_hooks:
@@ -202,7 +203,7 @@ class OpenSegTester(TesterBase):
                 pred = np.load(pred_save_path)
                 score = np.load(score_save_path)
             else:
-                pred = torch.zeros((segment.size, self.cfg.data.num_classes)).cuda()
+                pred = torch.zeros((segment.size, self.dim_pred)).cuda()
                 score = []
                 score_idx = []
                 for i in range(len(fragment_list)):
@@ -446,10 +447,10 @@ class OpenSegTester(TesterBase):
     def collate_fn(batch):
         return batch
 
-    def build_model_hook(self):
+    def build_model_hook(self, model=None):
         model_hooks = build_model_hook(self.cfg.model_hooks)
         model_hooks.set_logger(self.logger)
-        model_hooks.set_model(self.model)
+        model_hooks.set_model(model or self.model)
         self.logger.info(model_hooks)
         return model_hooks
 
@@ -488,10 +489,18 @@ class OpenSegTester(TesterBase):
                         trainer_recognizer.class_means = checkpoint[
                             "recognizer_class_means"
                         ]
+                    else:
+                        self.logger.warning(
+                            "No recognizer class means found in checkpoint."
+                        )
                     if checkpoint.get("recognizer_class_covs", None) is not None:
                         trainer_recognizer.class_covs = checkpoint[
                             "recognizer_class_covs"
                         ]
+                    else:
+                        self.logger.warning(
+                            "No recognizer class covariances found in checkpoint."
+                        )
             else:
                 raise RuntimeError(
                     "=> No checkpoint found at '{}'".format(self.cfg.weight)
@@ -514,6 +523,7 @@ class IncrSegTester(TesterBase):
 
         self.trainer = MockTrainer(cfg)
         IncrSegEvaluator.before_train(self)
+        self.dim_pred = self.remap_num_classes
 
     def test(self):
         assert self.test_loader.batch_size == 1
@@ -575,7 +585,7 @@ class IncrSegTester(TesterBase):
                 )
                 pred = np.load(pred_save_path)
             else:
-                pred = torch.zeros((segment.size, self.remap_num_classes)).cuda()
+                pred = torch.zeros((segment.size, self.dim_pred)).cuda()
                 for i in range(len(fragment_list)):
                     fragment_batch_size = 1
                     s_i, e_i = i * fragment_batch_size, min(
