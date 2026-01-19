@@ -30,7 +30,7 @@ from pointcept.datasets import build_dataset, point_collate_fn, collate_fn
 from pointcept.models import build_model
 from pointcept.models.utils import build_model_hook
 from pointcept.recognizers import build_recognizer
-from pointcept.incrLearner.builder import build_incremental_learner
+from pointcept.incrLearners.builder import build_incremental_learner
 from pointcept.utils.logger import get_root_logger
 from pointcept.utils.optimizer import build_optimizer, build_optimizer_from_named_params
 from pointcept.utils.scheduler import build_scheduler
